@@ -853,7 +853,9 @@ pub trait ByteOrder:
     /// ```
     #[inline]
     fn write_int(buf: &mut [u8], n: i64, nbytes: usize) {
-        Self::write_uint(buf, unextend_sign(n, nbytes), nbytes)
+        let un = unextend_sign(n, nbytes);
+        assert!(extend_sign(un, nbytes) == n);
+        Self::write_uint(buf, un, nbytes)
     }
 
     /// Writes a signed integer `n` to `buf` using only `nbytes`.
@@ -876,7 +878,9 @@ pub trait ByteOrder:
     /// ```
     #[inline]
     fn write_int128(buf: &mut [u8], n: i128, nbytes: usize) {
-        Self::write_uint128(buf, unextend_sign128(n, nbytes), nbytes)
+        let un = unextend_sign128(n, nbytes);
+        assert!(extend_sign128(un, nbytes) == n);
+        Self::write_uint128(buf, un, nbytes)
     }
 
     /// Writes a IEEE754 single-precision (4 bytes) floating point number.
@@ -3236,6 +3240,76 @@ mod test {
         assert_eq!(x, 0);
         let x = LittleEndian::read_i128(&xs);
         assert_eq!(x, 0);
+    }
+
+    #[test]
+    fn regression205_write_int_representable() {
+        use crate::{BigEndian, ByteOrder, LittleEndian};
+
+        let mut buf = [0; 16];
+        for nbytes in 1..=8 {
+            let max = i64::MAX >> (64 - 8 * nbytes);
+            for n in [max, -max - 1, 0, -1] {
+                BigEndian::write_int(&mut buf, n, nbytes);
+                assert_eq!(n, BigEndian::read_int(&buf, nbytes));
+                LittleEndian::write_int(&mut buf, n, nbytes);
+                assert_eq!(n, LittleEndian::read_int(&buf, nbytes));
+            }
+        }
+        for nbytes in 1..=16 {
+            let max = i128::MAX >> (128 - 8 * nbytes);
+            for n in [max, -max - 1, 0, -1] {
+                BigEndian::write_int128(&mut buf, n, nbytes);
+                assert_eq!(n, BigEndian::read_int128(&buf, nbytes));
+                LittleEndian::write_int128(&mut buf, n, nbytes);
+                assert_eq!(n, LittleEndian::read_int128(&buf, nbytes));
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn regression205_write_int_too_big_big_endian() {
+        use crate::{BigEndian, ByteOrder};
+
+        let mut buf = [0; 8];
+        BigEndian::write_int(&mut buf, 128, 1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn regression205_write_int_too_big_little_endian() {
+        use crate::{ByteOrder, LittleEndian};
+
+        let mut buf = [0; 8];
+        LittleEndian::write_int(&mut buf, 1 << 55, 7);
+    }
+
+    #[test]
+    #[should_panic]
+    fn regression205_write_int_too_small() {
+        use crate::{ByteOrder, LittleEndian};
+
+        let mut buf = [0; 8];
+        LittleEndian::write_int(&mut buf, -129, 1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn regression205_write_int128_too_big() {
+        use crate::{BigEndian, ByteOrder};
+
+        let mut buf = [0; 16];
+        BigEndian::write_int128(&mut buf, 1 << 63, 8);
+    }
+
+    #[test]
+    #[should_panic]
+    fn regression205_write_int128_too_small() {
+        use crate::{ByteOrder, LittleEndian};
+
+        let mut buf = [0; 16];
+        LittleEndian::write_int128(&mut buf, -(1 << 119) - 1, 15);
     }
 }
 
